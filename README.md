@@ -37,7 +37,7 @@ Open `http://127.0.0.1:3000`. Without cloud credentials, use the durable device 
 
 ## Configure cloud and AI
 
-1. Use your existing Supabase project, or provision one in your own account if needed. Execute `supabase/migrations/001_initial.sql` in its SQL editor. The migration creates project/revision tables with row-level owner policies, a private `references` bucket and an atomic AI quota function. Do not disable row-level security.
+1. Use your Supabase project. For a fresh installation, open `supabase/migrations/001_initial.sql`, copy the **entire file** into the SQL Editor, select the `postgres` role and execute it once. The transaction creates project/revision tables, owner policies, explicit grants, private reference storage and an atomic AI quota function. Existing application tables make this initial migration fail safely; if you already ran an earlier version of `001`, use a separately reviewed upgrade migration instead. Do not drop existing tables to rerun this file. See [database security and execution notes](supabase/README.md) for the full contract and test coverage. No live database was accessed during development.
 2. Enable Supabase email OTP/magic-link authentication. Set Site URL and redirect allowlist to your actual Vercel domain and your local development origin. Configure production email delivery and Supabase's authentication rate limits.
 3. Set the environment values from `.env.example` in `.env.local` and in the **existing** Vercel project's Production and Preview environments:
 
@@ -59,11 +59,14 @@ API documentation used: [Images and vision](https://developers.openai.com/api/do
 
 ```sh
 pnpm test
+pnpm test:db
 pnpm typecheck
 pnpm build
 ```
 
-The deterministic tests cover units, setback reconciliation, floor generation, room/wall geometry, opening fit/access, unique room identities, staircase coordination, schema validation and reopening, upload validation, structured extraction schemas, assistant edit validation, wall movement, generated views, vector PDF pages, DXF units and scale preservation. They do not claim to test the external AI's perception accuracy or live Supabase policies without credentials. Browser QA is recorded in `VALIDATION.md`.
+The suite includes 20 application tests and database security tests against a real, disposable PostgreSQL process. `pnpm test:db` runs only the database tests. The runner always starts its own loopback-only cluster with a random password under ignored `tmp/database-tests/`, never reads `DATABASE_URL` or Supabase credentials, and stops/removes its cluster afterward. PostgreSQL binaries are test-only dependencies; their required setup scripts are allowlisted in `pnpm-workspace.yaml`. Run as a normal user (PostgreSQL does not run as Unix root). CI runs the same database tests through `pnpm test`.
+
+Application tests cover units, setback reconciliation, floor generation, room/wall geometry, opening fit/access, unique room identities, staircase coordination, schema validation and reopening, upload validation, structured extraction schemas, assistant edit validation, wall movement, generated views, vector PDF pages, DXF units and scale preservation. Database tests exercise the unchanged migration with test-only stand-ins for Supabase's managed auth/storage schema. They cover real RLS, grants, foreign keys and concurrent transactions, but do not replace testing Supabase's JWT gateway, actual object upload/download or external AI perception accuracy. Browser QA is recorded in `VALIDATION.md`.
 
 ### Eight-apartment acceptance case
 

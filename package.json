@@ -12,6 +12,7 @@
     "build": "next build",
     "start": "next start --hostname 127.0.0.1",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "test:db": "node --experimental-strip-types --test tests/database.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -25,8 +26,11 @@
   },
   "devDependencies": {
     "@types/node": "^22.19.19",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "embedded-postgres": "18.4.0-beta.17",
+    "pg": "^8.23.1",
     "prettier": "^3.9.10",
     "typescript": "^5.9.3"
   }

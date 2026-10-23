@@ -5,6 +5,8 @@ Date: 23 October 2026 (America/Guyana)
 ## Automated
 
 - Unit/geometry/export/server integration suite: 20 passing tests.
+- Database migration suite: 16 passing tests on real local PostgreSQL 18.4, with isolated Supabase auth/storage schema fixtures. Includes actual concurrent connections (80 calls -> 20 accepts; 40 calls at 19 used -> one accept), RLS/ACL isolation, foreign-key integrity, storage restrictive policies, UTC windows, search-path protection and transactional failure/rollback tests. No live Supabase database accessed.
+- Combined suite: all 36 tests passed with no failures or skips. The test harness uses native `pg_ctl` shutdown and verified temporary-directory cleanup, avoiding global exit hooks in the test worker.
 - Strict TypeScript validation: passed.
 - Next.js production build: passed, including `/`, `/api/interpret` and `/api/assistant`.
 - Further checks are recorded in the task completion report and Git history.
@@ -25,4 +27,4 @@ Date: 23 October 2026 (America/Guyana)
 
 ## Not verified against live services
 
-No Supabase or OpenAI credentials were available during initial development. Live sign-in, database policies, private uploads, extraction accuracy, assistant model output and cross-device persistence require the credential-backed launch checks listed in README.md. Provider-independent schema and geometry validation are tested. No government compliance, engineering certification or Vercel deployment is established by this record.
+No Supabase or OpenAI credentials were used. The migration's RLS policies, grants, constraints and quota function were executed and tested locally against PostgreSQL with managed-schema fixtures. Live sign-in/JWT verification, Storage API uploads and signed URLs, extraction accuracy, assistant model output and cross-device persistence still require the credential-backed launch checks listed in README.md. No government compliance, engineering certification or Vercel deployment is established by this record.
