@@ -1,3 +1,4 @@
 allowBuilds:
-  '@embedded-postgres/*': true
+  # pnpm 11 matches package identities, not scope globs. Linux is used by CI/Vercel.
+  '@embedded-postgres/linux-x64': true
   '@embedded-postgres/windows-x64': true
