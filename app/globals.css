@@ -1,4 +1,121 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;450;500;550;600;650;700&family=Manrope:wght@400;500;600;650;700;750;800&display=swap');
+.studio-control {
+  position: relative;
+}
+.studio-control .studio-switch {
+  width: 100%;
+  text-align: left;
+}
+.studio-switch > span:nth-child(2) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.studio-menu {
+  position: absolute;
+  top: calc(100% - 26px);
+  left: 0;
+  width: 240px;
+  padding: 8px;
+  background: white;
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  box-shadow: 0 12px 32px #142d3c30;
+  z-index: 50;
+}
+.studio-menu button {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  text-align: left;
+  border-radius: 5px;
+}
+.studio-menu button:hover {
+  background: #eef7f4;
+  color: var(--green);
+}
+.studio-user {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.studio-user small,
+.revision-row small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+}
+.auth-tabs,
+.auth-secondary,
+.history-pages {
+  display: flex;
+  gap: 12px;
+  margin: 18px 0;
+  flex-wrap: wrap;
+}
+.auth-tabs button {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 18px;
+}
+.auth-tabs .chosen {
+  background: #e9f5f0;
+  color: var(--green);
+  border-color: var(--green);
+}
+.text-button {
+  color: var(--green);
+  text-decoration: underline;
+  padding: 8px 0;
+}
+.auth-success {
+  background: #e9f5f0;
+  color: #17644f;
+  border: 1px solid #b9ddcd;
+  padding: 15px;
+  border-radius: 7px;
+  margin: 14px 0;
+  line-height: 1.6;
+}
+.account-info {
+  background: var(--bg);
+  padding: 15px;
+  border-radius: 7px;
+}
+.account-info > div {
+  display: flex;
+  gap: 15px;
+  padding: 8px 0;
+}
+.account-info dt {
+  flex: 0 0 110px;
+  color: var(--muted);
+}
+.account-info dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.cloud-library {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 18px 0;
+}
+.revision-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  padding: 15px 0;
+  border-bottom: 1px solid var(--border);
+}
+.sync-warning {
+  flex-wrap: wrap;
+  background: #fff6e9;
+  color: #805a20;
+}
 :root {
   --navy: #142d3c;
   --ink: #1b303d;
@@ -2933,4 +3050,44 @@ dd {
 }
 .sheet-caption {
   flex-shrink: 0;
+}
+
+@media (max-width: 960px) {
+  .studio-control .studio-switch {
+    display: flex;
+    padding: 8px;
+    margin-bottom: 20px;
+  }
+  .studio-switch > span:nth-child(2),
+  .studio-switch > svg {
+    display: none;
+  }
+  .studio-menu {
+    top: calc(100% - 15px);
+  }
+}
+@media (max-width: 760px) {
+  .top-actions .btn.auth-entry {
+    display: inline-flex;
+    padding: 8px;
+    font-size: 10px;
+  }
+  .top-actions {
+    gap: 5px;
+    flex-wrap: wrap;
+  }
+  .topbar {
+    height: auto;
+    min-height: 72px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    gap: 8px;
+  }
+  .account-info > div {
+    flex-direction: column;
+    gap: 5px;
+  }
+  .account-info dt {
+    flex: auto;
+  }
 }

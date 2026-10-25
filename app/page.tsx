@@ -67,12 +67,19 @@ import {
 import type { Project, Requirements, Unit, Floor, Point } from '../lib/model';
 import { drawing, sceneBounds, sceneSVG, dxf, sheets } from '../lib/drawings';
 import { exportPDF } from '../lib/pdf';
-import { accessToken, cloud, loadCloud, saveCloud, storeReference } from '../lib/cloud';
+import { accessToken, cloud, storeReference } from '../lib/cloud';
+import { useAuthentication } from '../components/use-authentication';
+import { useProjectWorkspace } from '../components/use-project-workspace';
+import { AccountPanel } from '../components/account-panel';
+import { CloudHistory } from '../components/cloud-history';
+import { ProjectImport } from '../components/project-import';
+import { writeDeviceProject } from '../lib/project-storage';
 import { evidenceSchema, validateUpload } from '../lib/ai';
 import type { Evidence } from '../lib/ai';
 import { applyAIProposal, resizeRoom, stretchAxis } from '../lib/editor';
 
-type Modal = 'requirements' | 'upload' | 'export' | 'checks' | 'account' | 'history' | null;
+type Modal =
+  'requirements' | 'upload' | 'export' | 'checks' | 'account' | 'history' | 'project-import' | null;
 type Selected = { kind: 'room' | 'wall' | 'opening' | 'feature'; id: string } | null;
 const uid = () => crypto.randomUUID();
 const date = (s: string) =>
@@ -81,7 +88,6 @@ const date = (s: string) =>
     dateStyle: 'medium',
     timeStyle: 'short',
   });
-const key = 'gy-planner-projects-v1';
 function download(data: BlobPart, name: string, type: string) {
   const url = URL.createObjectURL(new Blob([data], { type }));
   const a = document.createElement('a');
@@ -204,9 +210,7 @@ export default function Planner() {
     [drafts, setDrafts] = useState<Project[]>([]),
     [draftChoice, setDraftChoice] = useState(0),
     [error, setError] = useState('');
-  const [email, setEmail] = useState(''),
-    [signedIn, setSignedIn] = useState(''),
-    [prompt, setPrompt] = useState(''),
+  const [prompt, setPrompt] = useState(''),
     [messages, setMessages] = useState<{ role: string; text: string }[]>([]),
     [proposal, setProposal] = useState<{ project: Project; text: string } | null>(null),
     [evidence, setEvidence] = useState<Evidence | null>(null),
@@ -220,56 +224,83 @@ export default function Planner() {
     [evidenceSelections, setEvidenceSelections] = useState<Record<string, boolean>>({});
   const drag = useRef<{ point: Point; selected: Selected } | null>(null),
     svgRef = useRef<SVGSVGElement>(null),
-    importRef = useRef<HTMLInputElement>(null),
-    autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    importRef = useRef<HTMLInputElement>(null);
+  const auth = useAuthentication();
+  const signedIn = auth.user?.email || '';
+  const workspace = useProjectWorkspace(
+    auth.user,
+    auth.ready,
+    project,
+    setProject,
+    setProjects,
+    setStatus,
+    setNotice,
+  );
+  const [studioOpen, setStudioOpen] = useState(false),
+    [importId, setImportId] = useState<string | undefined>();
+  const studioRef = useRef<HTMLDivElement>(null),
+    busyOperation = useRef(0),
+    authOwnerRef = useRef<string | null>(null),
+    activeProjectRef = useRef<Project | null>(null);
+  authOwnerRef.current = auth.user?.id || null;
+  activeProjectRef.current = project;
   useEffect(() => {
-    try {
-      const list = JSON.parse(localStorage.getItem(key) || '[]').map((p: unknown) =>
-        projectSchema.parse(p),
-      );
-      setProjects(list);
-      setProject(list[0] || newProject());
-    } catch {
-      setProject(newProject());
-      setNotice('A local project could not be read. Import a native backup to recover it.');
-    }
-    const db = cloud();
-    if (db) {
-      void db.auth.getSession().then(({ data }) => setSignedIn(data.session?.user.email || ''));
-      const { data } = db.auth.onAuthStateChange((_, session) =>
-        setSignedIn(session?.user.email || ''),
-      );
-      return () => data.subscription.unsubscribe();
-    }
-  }, []);
+    setUndo([]);
+    busyOperation.current++;
+    setBusy(false);
+    setRedo([]);
+    setSelected(null);
+    setFloorIndex(0);
+    setProposal(null);
+    setEvidence(null);
+    setFiles([]);
+    setMessages([]);
+    setDrafts([]);
+    setForm({ ...defaultRequirements });
+    setNotice('');
+    setStudioOpen(false);
+    setModal((current) => (current === 'account' ? current : null));
+  }, [auth.user?.id]);
   useEffect(() => {
-    if (!project) return;
-    const p = project;
-    const timer = setTimeout(() => {
-      try {
-        const saved = JSON.parse(localStorage.getItem(key) || '[]') as Project[];
-        const list = [p, ...saved.filter((x) => x.id !== p.id)];
-        localStorage.setItem(key, JSON.stringify(list));
-        setProjects(list);
-        setStatus('Saved on this device');
-      } catch {
-        setStatus('Local storage full — download a backup');
-      }
-    }, 450);
-    if (signedIn && cloud()) {
-      if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
-      autosaveTimer.current = setTimeout(() => {
-        setStatus('Saving to cloud…');
-        void saveCloud(p)
-          .then(() => setStatus('Saved to cloud'))
-          .catch((e) => setStatus(`Cloud save failed: ${e.message}`));
-      }, 2200);
-    }
-    return () => {
-      clearTimeout(timer);
-      if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    if (auth.recovery) setModal('account');
+  }, [auth.recovery]);
+  useEffect(() => {
+    if (!studioOpen) return;
+    const close = (e: PointerEvent) => {
+      if (!studioRef.current?.contains(e.target as Node)) setStudioOpen(false);
     };
-  }, [project, signedIn]);
+    const escape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setStudioOpen(false);
+    };
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', escape);
+    return () => {
+      document.removeEventListener('pointerdown', close);
+      document.removeEventListener('keydown', escape);
+    };
+  }, [studioOpen]);
+  function openAccount(mode: 'signin' | 'signup' | 'forgot' = 'signin') {
+    auth.open(mode);
+    setError('');
+    setStudioOpen(false);
+    setModal('account');
+  }
+  function openCloudProjects() {
+    setModal(null);
+    setStudioOpen(false);
+    setScreen('dashboard');
+    void workspace.refresh();
+  }
+  function openProjectImport(id?: string) {
+    setImportId(id);
+    setError('');
+    setStudioOpen(false);
+    if (!auth.user) {
+      openAccount();
+      return;
+    }
+    setModal('project-import');
+  }
   useEffect(() => {
     const handle = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.closest('input,textarea,select')) return;
@@ -293,6 +324,7 @@ export default function Planner() {
     if (!project) return;
     setUndo((v) => [...v.slice(-39), structuredClone(project)]);
     setRedo([]);
+    if (p.id !== project.id) workspace.registerNew(p);
     setFloorIndex((i) => Math.min(i, p.floors.length - 1));
     setProject({
       ...p,
@@ -303,14 +335,14 @@ export default function Planner() {
   function doUndo() {
     if (!project || !undo.length) return;
     setRedo((v) => [...v, project]);
-    setProject(undo[undo.length - 1]);
+    workspace.activate(undo[undo.length - 1]);
     setUndo((v) => v.slice(0, -1));
     setSelected(null);
   }
   function doRedo() {
     if (!project || !redo.length) return;
     setUndo((v) => [...v, project]);
-    setProject(redo[redo.length - 1]);
+    workspace.activate(redo[redo.length - 1]);
     setRedo((v) => v.slice(0, -1));
     setSelected(null);
   }
@@ -541,15 +573,15 @@ export default function Planner() {
   async function manualSave() {
     if (!project) return;
     try {
-      if (signedIn) {
-        await saveCloud(project);
-        setStatus('Saved to cloud');
+      if (auth.user) {
+        if (!workspace.isCloud(project.id)) {
+          openProjectImport(project.id);
+          return;
+        }
+        await workspace.save(project);
         setNotice('Project and revision saved to your cloud account.');
       } else {
-        localStorage.setItem(
-          key,
-          JSON.stringify([project, ...projects.filter((x) => x.id !== project.id)]),
-        );
+        writeDeviceProject(localStorage, project);
         setNotice('Project saved on this device. Sign in for cloud backup.');
       }
     } catch (e) {
@@ -558,14 +590,21 @@ export default function Planner() {
   }
   async function upload() {
     if (!project || !files.length) return;
+    const operation = ++busyOperation.current;
+    const owner = authOwnerRef.current,
+      drawingAtStart = project;
+    const current = () =>
+      owner === authOwnerRef.current && drawingAtStart === activeProjectRef.current;
     setBusy(true);
     setError('');
     try {
       const refs = [];
       for (const file of files) {
+        if (!current()) return;
         validateUpload(file);
         refs.push(await storeReference(project, file));
       }
+      if (!current()) return;
       change(
         {
           ...project,
@@ -579,13 +618,19 @@ export default function Planner() {
         'References stored privately. Select Interpret references to extract measurements.',
       );
     } catch (e) {
+      if (!current()) return;
       setError((e as Error).message);
     } finally {
-      setBusy(false);
+      if (operation === busyOperation.current) setBusy(false);
     }
   }
   async function interpret() {
     if (!project) return;
+    const operation = ++busyOperation.current;
+    const owner = authOwnerRef.current,
+      drawingAtStart = project;
+    const current = () =>
+      owner === authOwnerRef.current && drawingAtStart === activeProjectRef.current;
     setBusy(true);
     setError('');
     try {
@@ -599,13 +644,15 @@ export default function Planner() {
         body: JSON.stringify({ references: project.references.slice(-4) }),
       });
       const data = await res.json();
+      if (!current()) return;
       if (!res.ok) throw Error(data.error);
       setEvidence(evidenceSchema.parse(data));
       setEvidenceSelections({});
     } catch (e) {
+      if (!current()) return;
       setError((e as Error).message);
     } finally {
-      setBusy(false);
+      if (operation === busyOperation.current) setBusy(false);
     }
   }
   function confirmEvidence() {
@@ -638,6 +685,11 @@ export default function Planner() {
     const text = prompt;
     setPrompt('');
     setMessages((v) => [...v, { role: 'user', text }]);
+    const operation = ++busyOperation.current;
+    const owner = authOwnerRef.current,
+      drawingAtStart = project;
+    const current = () =>
+      owner === authOwnerRef.current && drawingAtStart === activeProjectRef.current;
     setBusy(true);
     try {
       const token = await accessToken();
@@ -650,6 +702,7 @@ export default function Planner() {
         body: JSON.stringify({ project, prompt: text }),
       });
       const data = await res.json();
+      if (!current()) return;
       if (!res.ok) throw Error(data.error);
       if (!data.changes?.length) {
         setMessages((v) => [...v, { role: 'assistant', text: data.message }]);
@@ -665,14 +718,20 @@ export default function Planner() {
         },
       ]);
     } catch (e) {
+      if (!current()) return;
       setMessages((v) => [...v, { role: 'assistant', text: (e as Error).message }]);
     } finally {
-      setBusy(false);
+      if (operation === busyOperation.current) setBusy(false);
     }
   }
   async function exportFile() {
     if (!project) return;
     setError('');
+    const operation = ++busyOperation.current;
+    const owner = authOwnerRef.current,
+      drawingAtStart = project;
+    const current = () =>
+      owner === authOwnerRef.current && drawingAtStart === activeProjectRef.current;
     setBusy(true);
     try {
       const s = drawing(project, view, floorIndex),
@@ -683,6 +742,7 @@ export default function Planner() {
           paper,
           packageAll ? undefined : { view, floor: floorIndex },
         );
+        if (!current()) return;
         download(
           new Uint8Array(bytes).buffer,
           `${name}-${packageAll ? 'drawing-package' : s.title}.pdf`,
@@ -706,11 +766,14 @@ export default function Planner() {
           ctx.drawImage(img, 0, 0, c.width, c.height);
           const blob = await new Promise<Blob | null>((resolve) => c.toBlob(resolve, 'image/png'));
           if (!blob) throw Error('PNG rendering failed.');
-          download(await blob.arrayBuffer(), `${name}.png`, 'image/png');
+          const output = await blob.arrayBuffer();
+          if (!current()) return;
+          download(output, `${name}.png`, 'image/png');
         } finally {
           URL.revokeObjectURL(url);
         }
       }
+      if (!current()) return;
       change(
         {
           ...project,
@@ -721,16 +784,21 @@ export default function Planner() {
       setNotice(`${format} downloaded. Drawings are preliminary and need professional review.`);
       setModal(null);
     } catch (e) {
+      if (!current()) return;
       setError((e as Error).message);
     } finally {
-      setBusy(false);
+      if (operation === busyOperation.current) setBusy(false);
     }
   }
   async function importProject(file: File) {
+    const owner = authOwnerRef.current;
     try {
       if (file.size > 5000000) throw Error('Native project exceeds 5 MB.');
       const p = projectSchema.parse(JSON.parse(await file.text()));
-      setProject({ ...p, id: uid() });
+      if (owner !== authOwnerRef.current) return;
+      const imported = { ...p, id: uid() };
+      workspace.registerNew(imported);
+      setProject(imported);
       setScreen('workspace');
       setFloorIndex(0);
       setUndo([]);
@@ -740,7 +808,7 @@ export default function Planner() {
       setNotice(`Import failed: ${(e as Error).message}`);
     }
   }
-  if (!project)
+  if (!project || (auth.ready && workspace.owner !== (auth.user?.id || null)))
     return (
       <div className="loading">
         <Building2 size={36} />
@@ -767,6 +835,7 @@ export default function Planner() {
     checks: 'Preliminary submission readiness',
     account: 'Your account',
     history: 'Project history',
+    'project-import': 'Copy device projects to account',
   };
   return (
     <div className="app-shell">
@@ -786,12 +855,60 @@ export default function Planner() {
             GY Smart<span className="brand-sub">HOUSE PLANNER</span>
           </span>
         </a>
-        <div className="studio-switch">
-          <span className="avatar">GY</span>
-          <span>
-            My architecture studio<small>Personal workspace</small>
-          </span>
-          <ChevronDown size={15} />
+        <div className="studio-control" ref={studioRef}>
+          <button
+            className="studio-switch"
+            aria-label="My architecture studio"
+            aria-haspopup="menu"
+            aria-expanded={studioOpen}
+            onClick={() => setStudioOpen((v) => !v)}
+          >
+            <span className="avatar">{signedIn ? signedIn.slice(0, 2).toUpperCase() : 'GY'}</span>
+            <span>
+              My architecture studio<small>{signedIn || 'Personal workspace'}</small>
+            </span>
+            <ChevronDown size={15} />
+          </button>
+          {studioOpen && (
+            <div className="studio-menu" role="menu" aria-label="Studio account menu">
+              {auth.user ? (
+                <>
+                  <div className="studio-user">
+                    <b>{auth.user.user_metadata.full_name || 'Your account'}</b>
+                    <small>{auth.user.email}</small>
+                  </div>
+                  <button role="menuitem" onClick={() => openAccount()}>
+                    Account settings
+                  </button>
+                  <button role="menuitem" onClick={openCloudProjects}>
+                    Cloud projects
+                  </button>
+                  <button role="menuitem" onClick={() => openProjectImport()}>
+                    Copy device projects
+                  </button>
+                  <button
+                    role="menuitem"
+                    disabled={auth.busy}
+                    onClick={async () => {
+                      setStudioOpen(false);
+                      if (!(await auth.run('signout'))) setModal('account');
+                    }}
+                  >
+                    Sign out
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button role="menuitem" onClick={() => openAccount('signin')}>
+                    Sign in
+                  </button>
+                  <button role="menuitem" onClick={() => openAccount('signup')}>
+                    Create account
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </div>
         <div className="nav-label">WORKSPACE</div>
         <nav>
@@ -881,8 +998,7 @@ export default function Planner() {
           <button
             className="account"
             onClick={() => {
-              setError('');
-              setModal('account');
+              openAccount();
             }}
           >
             <span className="avatar">{signedIn ? signedIn.slice(0, 2).toUpperCase() : 'GY'}</span>
@@ -901,10 +1017,25 @@ export default function Planner() {
             {screen === 'workspace' && <span className="draft-pill">Draft</span>}
           </div>
           <div className="top-actions">
+            {auth.user ? (
+              <button className="btn auth-entry" onClick={() => openAccount()}>
+                Account
+              </button>
+            ) : (
+              <>
+                <button className="btn auth-entry" onClick={() => openAccount('signin')}>
+                  Sign in
+                </button>
+                <button className="btn auth-entry" onClick={() => openAccount('signup')}>
+                  Create account
+                </button>
+              </>
+            )}
+
             <span className="save-state">
               <span /> {status}
             </span>
-            <button className="btn" onClick={manualSave}>
+            <button className="btn" disabled={workspace.saving} onClick={manualSave}>
               <Save size={15} />
               Save project
             </button>
@@ -920,6 +1051,21 @@ export default function Planner() {
             </button>
           </div>
         </header>
+        {workspace.error && (
+          <div role="alert" className="notice sync-warning">
+            <AlertTriangle size={16} />
+            <span>{workspace.error}</span>
+            {workspace.conflict && (
+              <button
+                className="btn"
+                disabled={workspace.saving}
+                onClick={() => void workspace.resolveConflict().catch((e) => setNotice(e.message))}
+              >
+                Save my edits as a separate cloud project
+              </button>
+            )}
+          </div>
+        )}
         {notice && (
           <div className="notice" role="status">
             <CheckCircle2 size={17} />
@@ -975,7 +1121,7 @@ export default function Planner() {
               <div>
                 <span>
                   <FolderOpen size={18} />
-                  Projects on this device
+                  {auth.user ? 'Your projects' : 'Projects on this device'}
                 </span>
                 <b>{projects.length || 1}</b>
               </div>
@@ -1026,6 +1172,26 @@ export default function Planner() {
                 Import project
               </button>
             </div>
+            {auth.user && (
+              <div className="cloud-library">
+                <span>
+                  <Cloud size={16} />
+                  {workspace.loading
+                    ? 'Loading cloud projects…'
+                    : `${Object.keys(workspace.entries).length} account projects · ${workspace.deviceProjects.length} device projects`}
+                </span>
+                <button
+                  className="btn"
+                  disabled={workspace.loading}
+                  onClick={() => void workspace.refresh()}
+                >
+                  Refresh cloud projects
+                </button>
+                <button className="btn" onClick={() => openProjectImport()}>
+                  Copy device projects to account
+                </button>
+              </div>
+            )}
             <div className="project-grid">
               {(projects.length ? projects : [project])
                 .filter((p) => p.requirements.name.toLowerCase().includes(search.toLowerCase()))
@@ -1034,7 +1200,7 @@ export default function Planner() {
                     <button
                       className="project-thumbnail"
                       onClick={() => {
-                        setProject(p);
+                        workspace.activate(p);
                         setFloorIndex(0);
                         setView('Floor plan');
                         setScreen('workspace');
@@ -1044,7 +1210,9 @@ export default function Planner() {
                       }}
                     >
                       <Plan project={p} mini />
-                      <span className="project-chip">Architectural draft</span>
+                      <span className="project-chip">
+                        {workspace.isCloud(p.id) ? 'Cloud project' : 'On this device'}
+                      </span>
                       <ArrowUpRight className="open-arrow" size={23} />
                     </button>
                     <div className="project-card-body">
@@ -1069,6 +1237,7 @@ export default function Planner() {
                                 name: p.requirements.name + ' · copy',
                               },
                             };
+                            workspace.registerNew(copy);
                             setProject(copy);
                             setNotice('Project duplicated.');
                           }}
@@ -2203,9 +2372,16 @@ export default function Planner() {
                       <button
                         title="Preview reference"
                         onClick={async () => {
+                          const owner = authOwnerRef.current,
+                            currentProject = project.id;
                           const result = await cloud()
                             ?.storage.from('references')
                             .createSignedUrl(ref.path, 120);
+                          if (
+                            owner !== authOwnerRef.current ||
+                            currentProject !== activeProjectRef.current?.id
+                          )
+                            return;
                           if (result?.data)
                             window.open(result.data.signedUrl, '_blank', 'noopener,noreferrer');
                           else setError('Sign in to preview this cloud reference.');
@@ -2521,103 +2697,11 @@ export default function Planner() {
               )}
               {modal === 'account' && (
                 <>
-                  <div className="connection-status">
-                    <Cloud size={27} />
-                    <div>
-                      <b>
-                        {cloud()
-                          ? 'Cloud connection configured'
-                          : 'Cloud connection not configured'}
-                      </b>
-                      <p>
-                        {cloud()
-                          ? 'Sign in securely using an email link.'
-                          : 'Add Supabase environment variables and apply the included database migration. Your current drawings are saved on this device.'}
-                      </p>
-                    </div>
-                  </div>
-                  {signedIn ? (
-                    <>
-                      <p>
-                        Signed in as <b>{signedIn}</b>
-                      </p>
-                      <div className="modal-actions">
-                        <button
-                          className="btn"
-                          onClick={async () => {
-                            try {
-                              const list = await loadCloud();
-                              setProjects(list);
-                              localStorage.setItem(key, JSON.stringify(list));
-                              if (list[0]) {
-                                setProject(list[0]);
-                                setFloorIndex(0);
-                                setSelected(null);
-                              }
-                              setNotice('Cloud projects loaded.');
-                              setModal(null);
-                            } catch (e) {
-                              setError((e as Error).message);
-                            }
-                          }}
-                        >
-                          <FolderOpen size={15} />
-                          Load cloud projects
-                        </button>
-                        <button
-                          className="btn"
-                          onClick={async () => {
-                            await cloud()?.auth.signOut();
-                            setSignedIn('');
-                          }}
-                        >
-                          Sign out
-                        </button>
-                      </div>
-                    </>
-                  ) : (
-                    <form
-                      onSubmit={async (e) => {
-                        e.preventDefault();
-                        setError('');
-                        const db = cloud();
-                        if (!db) {
-                          setError(
-                            'Configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in your Vercel project, then redeploy.',
-                          );
-                          return;
-                        }
-                        const { error } = await db.auth.signInWithOtp({
-                          email,
-                          options: { emailRedirectTo: window.location.origin },
-                        });
-                        if (error) setError(error.message);
-                        else setNotice('Check your email for a secure sign-in link.');
-                      }}
-                    >
-                      <label className="field">
-                        Email address
-                        <input
-                          type="email"
-                          required
-                          placeholder="you@example.com"
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                        />
-                      </label>
-                      <button className="btn primary full">
-                        <LogIn size={16} />
-                        Send secure sign-in link
-                      </button>
-                    </form>
-                  )}
-                  <h3 className="subheading">Service setup</h3>
-                  <p className="helper">
-                    Cloud projects, private reference storage and version history require Supabase.
-                    Image interpretation and assistant edits additionally require server-only
-                    OPENAI_API_KEY and OPENAI_MODEL. The source README contains deployment steps.
-                    API credentials never belong in project files or browser code.
-                  </p>
+                  <AccountPanel
+                    auth={auth}
+                    onProjects={openCloudProjects}
+                    onImport={() => openProjectImport()}
+                  />
                   <button
                     className="btn"
                     onClick={() => {
@@ -2630,48 +2714,33 @@ export default function Planner() {
                   </button>
                 </>
               )}
+              {modal === 'project-import' && (
+                <ProjectImport
+                  key={importId || 'all'}
+                  projects={workspace.deviceProjects}
+                  initialId={importId}
+                  busy={workspace.saving}
+                  onImport={workspace.copyToAccount}
+                />
+              )}
               {modal === 'history' && (
                 <>
-                  <div className="section-heading">
-                    <h3>Saved cloud revisions</h3>
-                    <button
-                      className="btn"
-                      onClick={async () => {
-                        try {
-                          const db = cloud();
-                          if (!db)
-                            throw Error('Cloud version restoration requires Supabase and sign-in.');
-                          const { data, error } = await db
-                            .from('project_revisions')
-                            .select('id,created_at,model')
-                            .eq('project_id', project.id)
-                            .order('created_at', { ascending: false })
-                            .limit(10);
-                          if (error) throw error;
-                          if (!data.length) {
-                            setError('No cloud revisions yet. Sign in and save your project.');
-                            return;
-                          }
-                          const chosen = data[0];
-                          const restored = projectSchema.parse(chosen.model);
-                          setProposal({
-                            project: restored,
-                            text: `Restore the latest cloud snapshot from ${date(chosen.created_at)}. The current drawing can be recovered with Undo.`,
-                          });
-                          setModal(null);
-                          setScreen('workspace');
-                        } catch (e) {
-                          setError((e as Error).message);
-                        }
-                      }}
-                    >
-                      <History size={14} />
-                      Preview latest cloud snapshot
-                    </button>
-                  </div>
+                  <CloudHistory
+                    project={project}
+                    owner={auth.user?.id || null}
+                    onPreview={(restored, snapshotDate) => {
+                      setProposal({
+                        project: restored,
+                        text: `Restore the snapshot from ${date(snapshotDate)}. Review before applying; the current draft is saved on this device.`,
+                      });
+                      setModal(null);
+                      setScreen('workspace');
+                    }}
+                  />
+                  <h3 className="subheading">Local edit log</h3>
                   <p className="helper">
-                    Cloud saves store complete restorable snapshots. Local edit history records
-                    change notes; Undo stores the last 40 edits in this session.
+                    Cloud snapshots are restorable above. Undo keeps the last 40 edits in this
+                    session.
                   </p>
                   {[...project.revisions].reverse().map((rev, i) => (
                     <div className="revision-row" key={i}>

@@ -1,5 +1,20 @@
 # Initial database migration: security and execution
 
+For the current authentication/cloud UI, also apply `migrations/002_cloud_saving.sql`
+after `001`. Existing installations need only the additive `002` migration; never
+drop tables or rerun `001` to add the function. See [authentication setup](../AUTH_SETUP.md).
+
+`save_project` runs as the authenticated caller (SECURITY INVOKER), pins an empty
+search path, fully qualifies database objects, and is executable only by
+`authenticated`. Existing table grants and RLS continue to enforce ownership. The
+claimed owner must match `auth.uid()`, including if the browser account changes
+during a request. New UUIDs use insert without overwrite. Updates compare the
+last server timestamp under PostgreSQL row locking; one concurrent save wins and
+stale saves raise `40001`. The complete revision insert shares the same transaction;
+if it fails, the project change rolls back. No quota function or Storage policy is
+changed by this upgrade. The SQL Editor transaction can be executed as `postgres`
+and the additive function migration can be rerun safely.
+
 `migrations/001_initial.sql` is ready for a **fresh Supabase installation**. It was executed and tested in disposable local PostgreSQL 18.4 clusters; no live Supabase database was connected to or modified. SQL uses standard PostgreSQL features also available in Supabase's supported PostgreSQL 15+ versions. The managed `auth` and `storage` schemas and normal Supabase roles/grants must already exist.
 
 ## Run through the SQL Editor

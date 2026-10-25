@@ -62,6 +62,114 @@ async function consume(id: string) {
   );
 }
 
+async function atomicSave(
+  owner: string,
+  id: string,
+  version: string | null,
+  name = 'Cloud project',
+  claimedOwner = owner,
+) {
+  return user(
+    owner,
+    async (db) =>
+      (
+        await db.query(
+          'select saved_updated_at::text as version from public.save_project($1,$2,$3,$4,$5)',
+          [id, claimedOwner, name, { id, name }, version],
+        )
+      ).rows[0].version as string,
+  );
+}
+
+test('database: atomic cloud save creates a project and revision visible on a second connection', async () => {
+  const id = randomUUID();
+  const version = await atomicSave(a, id, null);
+  assert.ok(version);
+  const loaded = await user(a, (db) =>
+    db.query('select model from public.projects where id=$1', [id]),
+  );
+  assert.equal(loaded.rows[0].model.name, 'Cloud project');
+  const next = await atomicSave(a, id, version, 'Updated from second device');
+  assert.notEqual(next, version);
+  assert.equal(
+    (
+      await user(a, (db) =>
+        db.query('select * from public.project_revisions where project_id=$1', [id]),
+      )
+    ).rowCount,
+    2,
+  );
+  assert.equal(
+    (await user(b, (db) => db.query('select * from public.projects where id=$1', [id]))).rowCount,
+    0,
+  );
+});
+
+test('database: two devices saving the same version produce one winner without extra revisions', async () => {
+  const id = randomUUID(),
+    version = await atomicSave(a, id, null);
+  const results = await Promise.allSettled(
+    Array.from({ length: 12 }, (_, i) => atomicSave(a, id, version, 'Device ' + i)),
+  );
+  assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
+  for (const result of results)
+    if (result.status === 'rejected') assert.equal(result.reason.code, '40001');
+  assert.equal(
+    (await pool.query('select * from public.project_revisions where project_id=$1', [id])).rowCount,
+    2,
+  );
+});
+
+test('database: first saves cannot overwrite a UUID and owner changes are rejected', async () => {
+  const id = randomUUID(),
+    version = await atomicSave(a, id, null);
+  await assert.rejects(() => atomicSave(a, id, null, 'Overwrite'), { code: '40001' });
+  await assert.rejects(() => atomicSave(b, id, version, 'Other owner'), { code: '40001' });
+  await denied(() => atomicSave(b, randomUUID(), null, 'Spoof', a));
+  await denied(() =>
+    user(
+      null,
+      (db) =>
+        db.query('select public.save_project($1,$2,$3,$4,null)', [randomUUID(), a, 'Anon', {}]),
+      'anon',
+    ),
+  );
+  const fn = (
+    await pool.query(
+      "select prosecdef,proconfig from pg_proc where oid='public.save_project(uuid,uuid,text,jsonb,timestamptz)'::regprocedure",
+    )
+  ).rows[0];
+  assert.equal(fn.prosecdef, false);
+  assert.ok(fn.proconfig.includes('search_path=""'));
+});
+
+test('database: failed revision writes roll back the project and version receipt', async () => {
+  const id = randomUUID(),
+    version = await atomicSave(a, id, null);
+  await pool.query(
+    "create function public.test_revision_failure() returns trigger language plpgsql as $$ begin raise exception 'test revision failure'; end $$",
+  );
+  await pool.query(
+    'create trigger test_revision_failure before insert on public.project_revisions for each row execute function public.test_revision_failure()',
+  );
+  try {
+    await assert.rejects(
+      () => atomicSave(a, id, version, 'Must roll back'),
+      /test revision failure/,
+    );
+  } finally {
+    await pool.query('drop trigger test_revision_failure on public.project_revisions');
+    await pool.query('drop function public.test_revision_failure()');
+  }
+  const row = (
+    await pool.query('select name,updated_at::text as version from public.projects where id=$1', [
+      id,
+    ])
+  ).rows[0];
+  assert.equal(row.name, 'Cloud project');
+  assert.equal(row.version, version);
+});
+
 before(
   async () => {
     await mkdir(root, { recursive: true });
@@ -104,6 +212,12 @@ before(
         'utf8',
       );
       await pool.query(migration);
+      await pool.query(
+        await readFile(
+          new URL('../supabase/migrations/002_cloud_saving.sql', import.meta.url),
+          'utf8',
+        ),
+      );
       await pool.query('insert into auth.users(id) values($1),($2)', [a, b]);
       await user(a, (db) =>
         db.query('insert into public.projects(id,owner_id,name,model) values($1,$2,$3,$4)', [

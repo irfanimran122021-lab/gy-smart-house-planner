@@ -1,5 +1,31 @@
 # Validation record
 
+## Authentication/cloud update — 24 October 2026 (America/Guyana)
+
+- 52 automated tests pass: 20 existing application tests, 20 real PostgreSQL
+  database/security tests, 11 authentication/cloud/cache tests, and one real
+  Supabase SDK session-persistence test with isolated HTTP/storage responses.
+- Both migration files execute in a fresh disposable PostgreSQL cluster. Atomic
+  save tests cover create/reopen through separate connections, 12 concurrent edits
+  of one version (exactly one wins), stale/new-ID collisions, ownership isolation,
+  and rollback of the project when a revision write fails.
+- Existing private bucket policies and concurrent AI quota tests continue passing.
+- Strict TypeScript check and production build pass without cloud credentials.
+  An initial sandbox filesystem restriction prevented one generated Next.js folder;
+  repeating the build with the required filesystem access succeeded.
+- Live deployed UI inspection confirmed the original studio label was not a button
+  and no header Sign in/Create account buttons existed.
+- Local production browser checks verify both header buttons, a functional studio
+  dropdown, signup/signin/recovery forms, a clear missing-configuration error,
+  existing floor-plan rendering, and preservation of two previous device projects.
+  The document remains within its 1265 px viewport width.
+- No production credentials, accounts or email sends were used. Live confirmation
+  email delivery, recovery links, Supabase JWT gateway/Storage HTTP behavior and
+  real cross-device acceptance remain operator checks in `AUTH_SETUP.md`.
+- No live Supabase migration was run and no Vercel/GitHub project was created.
+
+The record below describes the earlier baseline validation.
+
 Date: 23 October 2026 (America/Guyana)
 
 ## Automated
