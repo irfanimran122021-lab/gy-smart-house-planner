@@ -20,6 +20,8 @@ type Options = {
 export default class LocalPostgres {
   private options: Options;
   private child: ChildProcess | undefined;
+  private childClosed: Promise<void> | undefined;
+  private connectionClosures: Promise<void>[] = [];
   private binaries: Promise<{ initdb: string; postgres: string; pg_ctl: string }>;
   constructor(options: Options) {
     this.options = options;
@@ -93,6 +95,7 @@ export default class LocalPostgres {
         ],
         { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] },
       );
+      this.childClosed = new Promise<void>((closed) => this.child!.once('close', () => closed()));
       const log = (data: Buffer) => {
         const message = String(data);
         this.options.onLog(message);
@@ -118,7 +121,7 @@ export default class LocalPostgres {
   }
   getPgClient(database = 'postgres', host = '127.0.0.1') {
     if (host !== '127.0.0.1') throw Error('Test connections must use loopback');
-    return new Client({
+    const client = new Client({
       host,
       port: this.options.port,
       user: this.options.user,
@@ -126,12 +129,16 @@ export default class LocalPostgres {
       database,
       connectionTimeoutMillis: 10000,
     });
+    client.once('connect', () => {
+      this.connectionClosures.push(new Promise<void>((closed) => client.once('end', closed)));
+    });
+    return client;
   }
   private async databaseCommand(verb: 'create' | 'drop', name: string) {
     if (!/^[a-z_]+$/.test(name)) throw Error('Invalid local test database name');
     const client = this.getPgClient();
-    await client.connect();
     try {
+      await client.connect();
       await client.query(`${verb} database "${name}"`);
     } finally {
       await client.end();
@@ -144,7 +151,12 @@ export default class LocalPostgres {
     return this.databaseCommand('drop', name);
   }
   async stop() {
-    if (!this.child || this.child.exitCode !== null || this.child.signalCode !== null) return;
+    await Promise.all(this.connectionClosures);
+    if (!this.child) return;
+    if (this.child.exitCode !== null || this.child.signalCode !== null) {
+      await this.childClosed;
+      return;
+    }
     const { pg_ctl } = await this.binaries;
     await this.run(pg_ctl, [
       '-D',
@@ -158,15 +170,7 @@ export default class LocalPostgres {
     ]);
     // pg_ctl's success means the server stopped. Wait for its process streams
     // to close as well before the test removes the verified data directory.
-    if (this.child.exitCode === null && this.child.signalCode === null) {
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(Error('Local PostgreSQL did not close')), 10000);
-        this.child!.once('close', () => {
-          clearTimeout(timeout);
-          resolve();
-        });
-      });
-    }
+    await this.childClosed;
     this.child = undefined;
   }
 }

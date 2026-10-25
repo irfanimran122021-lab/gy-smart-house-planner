@@ -1,5 +1,21 @@
 # Validation record
 
+## PostgreSQL lifecycle fix — 24 October 2026
+
+The database test teardown now waits for every pooled client's `end` event after
+`pool.end()`. pg-pool can finish its bookkeeping before client sockets close;
+stopping PostgreSQL in that gap caused Linux to report administrator-termination
+errors after otherwise successful tests. Standalone fixture clients and the
+PostgreSQL child process also have explicit close barriers. Concurrent quota
+batches await all sibling operations even when one rejects. Unexpected driver
+errors are collected and rethrown from teardown, never suppressed.
+
+The local suite passes all 54 tests, including two deterministic lifecycle
+regressions for delayed socket closure and propagation of connection errors.
+The original 80-connection/40-connection quota tests and all security tests remain.
+No application code, production database migration or security policy is changed.
+Remote Linux CI and deployment results are reported in the task completion message.
+
 ## Authentication/cloud update — 24 October 2026 (America/Guyana)
 
 - 52 automated tests pass: 20 existing application tests, 20 real PostgreSQL

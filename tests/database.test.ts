@@ -5,6 +5,7 @@ import { resolve, sep } from 'node:path';
 import { createServer } from 'node:net';
 import { randomUUID } from 'node:crypto';
 import LocalPostgres from './helpers/local-postgres.ts';
+import { trackPoolShutdown } from './helpers/drain-pool.ts';
 import { Pool } from 'pg';
 import type { PoolClient } from 'pg';
 
@@ -14,6 +15,7 @@ const root = resolve('tmp/database-tests');
 let directory: string;
 let server: LocalPostgres;
 let pool: Pool;
+let closePool: (() => Promise<void>) | undefined;
 const logs: string[] = [];
 const a = '11111111-1111-4111-8111-111111111111';
 const b = '22222222-2222-4222-8222-222222222222';
@@ -60,6 +62,19 @@ async function consume(id: string) {
     async (db) =>
       (await db.query('select public.consume_ai_request() as allowed')).rows[0].allowed as boolean,
   );
+}
+
+async function finishConcurrent<T>(operations: Promise<T>[]) {
+  // Even if one query fails, await every sibling transaction/release before the
+  // test rejects and the after hook starts shutting down the cluster.
+  const settled = await Promise.allSettled(operations);
+  const failures = settled.filter((r) => r.status === 'rejected');
+  if (failures.length)
+    throw new AggregateError(
+      failures.map((r) => r.reason),
+      'Concurrent database operations failed',
+    );
+  return settled.map((r) => (r as PromiseFulfilledResult<T>).value);
 }
 
 async function atomicSave(
@@ -206,6 +221,7 @@ before(
         max: 40,
         connectionTimeoutMillis: 10000,
       });
+      closePool = trackPoolShutdown(pool);
       await pool.query(await readFile(new URL('./fixtures/supabase.sql', import.meta.url), 'utf8'));
       migration = await readFile(
         new URL('../supabase/migrations/001_initial.sql', import.meta.url),
@@ -244,8 +260,19 @@ before(
 );
 
 after(async () => {
-  await pool?.end();
-  if (server) await server.stop();
+  // Do not stop the server until every driver connection emitted its end event.
+  const failures: unknown[] = [];
+  try {
+    await closePool?.();
+  } catch (error) {
+    failures.push(error);
+  }
+  try {
+    if (server) await server.stop();
+  } catch (error) {
+    // Keep the directory for diagnosis if the process could not stop safely.
+    throw new AggregateError([...failures, error], 'Database teardown failed');
+  }
   // Verify the exact absolute target before recursive cleanup. No external DB
   // or user directory is ever accepted by this test runner.
   if (directory) {
@@ -253,6 +280,7 @@ after(async () => {
     assert.ok(/^pg-[\w-]+$/.test(directory.split(sep).at(-1)!));
     await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
+  if (failures.length) throw new AggregateError(failures, 'Database connection teardown failed');
 });
 
 test('database: fresh migration configures private bucket and least-privilege grants', async () => {
@@ -570,7 +598,7 @@ test('database: attacker search_path and a shadow quota table cannot redirect de
 });
 
 test('database: 80 concurrent calls contend on a new hour row and accept exactly 20', async () => {
-  const results = await Promise.all(Array.from({ length: 80 }, () => consume(b)));
+  const results = await finishConcurrent(Array.from({ length: 80 }, () => consume(b)));
   assert.equal(results.filter(Boolean).length, 20);
   assert.equal(results.filter((v) => !v).length, 60);
   assert.equal(
@@ -587,7 +615,7 @@ test('database: 40 concurrent calls at 19 used permit exactly one more request',
     "insert into public.ai_usage values($1,date_trunc('hour',statement_timestamp(),'UTC'),19)",
     [id],
   );
-  const results = await Promise.all(Array.from({ length: 40 }, () => consume(id)));
+  const results = await finishConcurrent(Array.from({ length: 40 }, () => consume(id)));
   assert.equal(results.filter(Boolean).length, 1);
   assert.equal(
     (await pool.query('select requests from public.ai_usage where owner_id=$1', [id])).rows[0]
