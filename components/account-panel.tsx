@@ -41,6 +41,7 @@ export function AccountPanel({
               ? 'Use your account to keep projects and revision history together. Local projects stay on this device until you choose to copy them.'
               : 'The deployment needs the two existing Supabase public environment variables and a rebuild. You can continue drafting on this device.'}
           </p>
+          {auth.projectHost && <p className="helper">Authentication server: {auth.projectHost}</p>}
         </div>
       </div>
       {!auth.ready && (
@@ -58,7 +59,7 @@ export function AccountPanel({
           {auth.message}
         </div>
       )}
-      {auth.user && auth.mode !== 'update' ? (
+      {auth.user && auth.mode !== 'update' && auth.mode !== 'forgot' ? (
         <>
           <h3 className="subheading">
             <UserRound size={17} /> Account information
@@ -127,12 +128,14 @@ export function AccountPanel({
             <div className="auth-tabs">
               <button
                 className={auth.mode === 'signin' ? 'chosen' : ''}
+                disabled={auth.busy}
                 onClick={() => auth.open('signin')}
               >
                 Sign in
               </button>
               <button
                 className={auth.mode === 'signup' ? 'chosen' : ''}
+                disabled={auth.busy}
                 onClick={() => auth.open('signup')}
               >
                 Create account
@@ -208,8 +211,19 @@ export function AccountPanel({
           </form>
           {auth.mode === 'signin' && (
             <div className="auth-secondary">
-              <button className="text-button" onClick={() => auth.open('forgot')}>
-                Forgot your password?
+              <button
+                className="text-button"
+                disabled={auth.busy}
+                onClick={() => auth.open('forgot')}
+              >
+                Forgot password?
+              </button>
+              <button
+                className="text-button"
+                disabled={auth.busy}
+                onClick={() => void auth.run('resend', { email })}
+              >
+                Resend confirmation email
               </button>
               <button
                 className="text-button"

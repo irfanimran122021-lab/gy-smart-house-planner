@@ -4,15 +4,26 @@ import type { User } from '@supabase/supabase-js';
 import { cloud } from '../lib/cloud';
 import { authAction } from '../lib/auth';
 import type { AuthAction, AuthInput, AuthMode } from '../lib/auth';
+import {
+  authProjectHost,
+  cleanAuthCallbackURL,
+  readAuthCallback,
+  resolveAuthCallback,
+} from '../lib/auth-callback';
+import type { AuthCallback } from '../lib/auth-callback';
 export function useAuthentication() {
   const running = useRef(false);
+  const callback = useRef<AuthCallback | null>(null);
+  if (typeof window !== 'undefined' && !callback.current)
+    callback.current = readAuthCallback(window.location.href);
   const [user, setUser] = useState<User | null>(null),
     [ready, setReady] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [message, setMessage] = useState(''),
     [mode, setMode] = useState<AuthMode>('signin'),
-    [recovery, setRecovery] = useState(false);
+    [callbackOpen, setCallbackOpen] = useState(false);
+  const projectHost = authProjectHost(process.env.NEXT_PUBLIC_SUPABASE_URL);
   const configured = Boolean(
     process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
   );
@@ -23,7 +34,8 @@ export function useAuthentication() {
       return;
     }
     let alive = true,
-      events = 0;
+      events = 0,
+      recoveryEvent = false;
     const receive = (next: User | null) => {
       if (alive) {
         setUser(next);
@@ -33,8 +45,9 @@ export function useAuthentication() {
     const { data } = db.auth.onAuthStateChange((event, session) => {
       events++;
       receive(session?.user || null);
-      if (alive && event === 'PASSWORD_RECOVERY') {
-        setRecovery(true);
+      if (alive && event === 'PASSWORD_RECOVERY' && !callback.current?.failed) {
+        recoveryEvent = true;
+        setCallbackOpen(true);
         setMode('update');
       }
     });
@@ -44,13 +57,21 @@ export function useAuthentication() {
         if (!alive) return;
         if (failure) setError(failure.message);
         if (events === 0) receive(session.session?.user || null);
-        if (new URL(window.location.href).searchParams.get('auth') === 'recovery') {
-          setRecovery(true);
-          setMode(session.session ? 'update' : 'forgot');
-          if (!session.session)
-            setError(
-              'The reset link is expired or incomplete. Request a new password reset email.',
-            );
+        const intent = callback.current || { kind: null, failed: false };
+        const result = resolveAuthCallback(
+          { ...intent, kind: recoveryEvent ? 'recovery' : intent.kind },
+          Boolean(session.session) && !failure,
+        );
+        if (result) {
+          window.history.replaceState(
+            {},
+            '',
+            cleanAuthCallbackURL(window.location.href, result.mode === 'update'),
+          );
+          setCallbackOpen(true);
+          setMode(result.mode);
+          setError(result.error);
+          setMessage(result.message);
         }
         setReady(true);
       })
@@ -60,15 +81,6 @@ export function useAuthentication() {
           setReady(true);
         }
       });
-    const url = new URL(window.location.href);
-    const failure =
-      url.searchParams.get('error_description') ||
-      new URLSearchParams(url.hash.slice(1)).get('error_description');
-    if (failure) {
-      setError(failure);
-      setRecovery(true);
-      setMode('forgot');
-    }
     return () => {
       alive = false;
       data.subscription.unsubscribe();
@@ -83,14 +95,13 @@ export function useAuthentication() {
     try {
       setMessage(await authAction(cloud(), action, input, window.location.origin));
       if (action === 'signout') {
-        setRecovery(false);
+        window.history.replaceState({}, '', cleanAuthCallbackURL(window.location.href));
+        setCallbackOpen(false);
         setMode('signin');
       }
       if (action === 'update') {
-        setRecovery(false);
-        const url = new URL(window.location.href);
-        url.searchParams.delete('auth');
-        window.history.replaceState({}, '', url);
+        setCallbackOpen(false);
+        window.history.replaceState({}, '', cleanAuthCallbackURL(window.location.href));
         setMode('signin');
       }
       return true;
@@ -107,6 +118,19 @@ export function useAuthentication() {
     setError('');
     setMessage('');
   }
-  return { user, ready, busy, error, message, mode, setMode, configured, recovery, run, open };
+  return {
+    user,
+    ready,
+    busy,
+    error,
+    message,
+    mode,
+    setMode,
+    configured,
+    projectHost,
+    callbackOpen,
+    run,
+    open,
+  };
 }
 export type Authentication = ReturnType<typeof useAuthentication>;

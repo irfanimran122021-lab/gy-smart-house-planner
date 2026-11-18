@@ -1,5 +1,26 @@
 # Validation record
 
+## Authentication diagnosis and recovery — 17 November 2026
+
+- Production's public Supabase URL resolves to project `zzqadafqlkavpryskwut`;
+  the public anon key reference matches. Read-only public Auth settings confirm
+  email authentication/signups enabled and email confirmation required. No keys
+  were printed or committed. The intended dashboard project remains an operator
+  comparison; private redirect settings and the existing user's password were
+  not inspected or changed.
+- Invalid-credentials guidance now points to the existing account's password
+  recovery. Unconfirmed-email errors point to resend confirmation. Passwords
+  continue to be passed unchanged; user UUIDs, projects and policies are preserved.
+- Recovery/confirmation intent is captured before SDK token-fragment cleanup.
+  Dashboard recovery links without the app query are supported. Expired links
+  never open the password form using an older session. Callback fragments are
+  cleaned and valid recovery can survive a refresh using a non-secret marker.
+- All 63 tests pass locally, including nine new callback, diagnostic and real-SDK
+  flow tests. SDK tests use isolated HTTP responses and test identities; they send
+  no real email and do not replace the user's live password-reset acceptance.
+- Strict TypeScript and Next.js production build pass. No dependency changes or
+  SQL migration is needed. Exact dashboard checks are in `AUTH_SETUP.md`.
+
 ## PostgreSQL lifecycle fix — 24 October 2026
 
 The database test teardown now waits for every pooled client's `end` event after

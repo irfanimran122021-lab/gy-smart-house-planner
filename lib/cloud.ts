@@ -9,7 +9,12 @@ export function cloud() {
     key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) return null;
   return (instance ??= createClient(url, key, {
-    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+    auth: {
+      flowType: 'implicit',
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
   }));
 }
 export type CloudRecord = { project: Project; version: string };

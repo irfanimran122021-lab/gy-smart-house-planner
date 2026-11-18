@@ -262,8 +262,8 @@ export default function Planner() {
     setModal((current) => (current === 'account' ? current : null));
   }, [auth.user?.id]);
   useEffect(() => {
-    if (auth.recovery) setModal('account');
-  }, [auth.recovery]);
+    if (auth.callbackOpen) setModal('account');
+  }, [auth.callbackOpen]);
   useEffect(() => {
     if (!studioOpen) return;
     const close = (e: PointerEvent) => {

@@ -1,5 +1,62 @@
 # Authentication and cloud saving
 
+## Investigating a confirmed account that cannot sign in
+
+On 17 November 2026, the production site's public JavaScript and public Auth
+settings showed project `zzqadafqlkavpryskwut` at
+`https://zzqadafqlkavpryskwut.supabase.co`. The anon key's project reference matched
+that host. Email authentication and signups were enabled, and automatic email
+confirmation was disabled (confirmation remains required). No keys are recorded
+here. The account dialog now displays only the authentication server's hostname
+so the operator can compare it with the dashboard containing the existing user.
+
+This verifies the deployed project/key pairing, not that the user's intended
+dashboard is the same project. Compare its Settings → Data API Project URL or the
+project reference in the dashboard URL with the host above. If different, update
+the existing Vercel project's Production `NEXT_PUBLIC_SUPABASE_URL` and
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` together using the intended project's browser-safe
+key, then redeploy. Do not delete or recreate users/projects to resolve this.
+
+The existing login calls `signInWithPassword`, trims the email, and deliberately
+does not trim or change passwords. `Invalid login credentials` is returned by
+Supabase, not project RLS. A confirmed email is not proof that the entered password
+matches that account; previous magic-link/invited users may need to set a password.
+If the project matches, use **Sign in → Forgot password?** with the existing
+account email. Follow the newest reset email, set a new password yourself, sign
+out, then sign in with that password. This preserves the account UUID and its data.
+Never send passwords or recovery links/tokens to a developer or paste them in chat.
+
+Verify these settings in the **existing** Supabase project:
+
+1. Authentication → Sign In / Providers → Email: keep Email enabled and
+   **Confirm email enabled**. Do not disable confirmation to fix a password error.
+2. Authentication → URL Configuration: Site URL must be
+   `https://gy-smart-house-planner.vercel.app`. Add these Redirect URLs:
+   `https://gy-smart-house-planner.vercel.app/` and
+   `https://gy-smart-house-planner.vercel.app/?auth=recovery`.
+3. Authentication → Email Templates: the Confirm signup and Reset password
+   links should use `{{ .ConfirmationURL }}` to perform Supabase verification
+   before redirecting. A link to `{{ .SiteURL }}` alone does not verify a token.
+   Keep the verification link intact; do not paste access tokens into templates.
+4. If email does not arrive, inspect Authentication logs and the project's SMTP
+   configuration, spam folder and email rate limits. Delivery and the private
+   redirect allowlist cannot be inspected using the public browser key.
+
+No dashboard settings, accounts, passwords, tables or RLS policies were changed
+by this update. No new migration is required for these authentication changes.
+
+The app captures confirmation/recovery intent before the SDK removes the URL
+fragment, including dashboard links with no app-specific query flag. Recovery
+requires an SDK session; expired/error links do not open the new-password form
+even if an older session exists. Successful recovery preserves a non-secret
+`auth=recovery` marker for refresh; token/error fragments are removed from the
+address bar after the SDK has processed them. Existing signup emails may still
+use the unchanged root redirect. Resend confirmation is available on Sign in.
+
+Official references: [Password authentication](https://supabase.com/docs/guides/auth/passwords),
+[redirect URLs](https://supabase.com/docs/guides/auth/redirect-urls),
+[email templates](https://supabase.com/docs/guides/auth/auth-email-templates).
+
 Use the existing GitHub repository, Supabase project and Vercel deployment at
 https://gy-smart-house-planner.vercel.app. No replacement project is needed.
 
