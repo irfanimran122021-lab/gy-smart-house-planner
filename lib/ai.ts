@@ -79,15 +79,15 @@ export const editJSON = {
   },
 };
 export function validateUpload(file: { name: string; type: string; size: number }) {
-  const types: Record<string, string> = {
-    'image/jpeg': 'jpg',
-    'image/png': 'png',
-    'image/webp': 'webp',
-    'application/pdf': 'pdf',
+  const types: Record<string, RegExp> = {
+    'image/jpeg': /\.jpe?g$/i,
+    'image/png': /\.png$/i,
+    'image/webp': /\.webp$/i,
+    'application/pdf': /\.pdf$/i,
   };
   if (!types[file.type]) throw Error('Use JPG, PNG, WEBP or PDF.');
   if (file.size <= 0 || file.size > 3 * 1024 * 1024)
     throw Error('Each file must be between 1 byte and 3 MB. Compress larger scans first.');
-  if (!/\.(jpe?g|png|webp|pdf)$/i.test(file.name))
-    throw Error('File extension must match an accepted format.');
+  if (!types[file.type].test(file.name))
+    throw Error('File extension must match its JPG, PNG, WEBP or PDF content type.');
 }

@@ -1,6 +1,17 @@
-import type { Floor, Project } from './model.ts';
+import type { Floor, Project, Wall } from './model.ts';
 import { geometryIssues, requirementsSchema, generateFloors } from './model.ts';
 import { editSchema } from './ai.ts';
+export function resizeWallLength(wall: Wall, length: number): Wall {
+  const dx = wall.b.x - wall.a.x,
+    dy = wall.b.y - wall.a.y;
+  const current = Math.hypot(dx, dy);
+  if (!Number.isFinite(length) || length <= 0 || current <= 0)
+    throw Error('Enter a positive wall length for a nonzero wall segment.');
+  return {
+    ...wall,
+    b: { x: wall.a.x + (dx * length) / current, y: wall.a.y + (dy * length) / current },
+  };
+}
 export function stretchAxis(
   f: Floor,
   axis: 'x' | 'y',

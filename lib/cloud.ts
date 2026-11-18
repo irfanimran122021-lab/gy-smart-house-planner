@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { projectSchema } from './model.ts';
 import type { Project } from './model.ts';
+import { validateUpload } from './ai.ts';
 let instance: SupabaseClient | null = null;
 export function cloud() {
   if (typeof window === 'undefined') return null;
@@ -123,8 +124,12 @@ export async function cloudRevisions(
 export async function accessToken() {
   return (await cloud()?.auth.getSession())?.data.session?.access_token;
 }
-export async function storeReference(project: Project, file: File) {
-  const db = cloud();
+export async function storeReference(
+  project: Project,
+  file: File,
+  db: SupabaseClient | null = cloud(),
+) {
+  validateUpload(file);
   if (!db) throw Error('Sign in with cloud storage configured to retain reference uploads.');
   const {
     data: { user },

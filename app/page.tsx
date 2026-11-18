@@ -76,7 +76,7 @@ import { ProjectImport } from '../components/project-import';
 import { writeDeviceProject } from '../lib/project-storage';
 import { evidenceSchema, validateUpload } from '../lib/ai';
 import type { Evidence } from '../lib/ai';
-import { applyAIProposal, resizeRoom, stretchAxis } from '../lib/editor';
+import { applyAIProposal, resizeRoom, resizeWallLength, stretchAxis } from '../lib/editor';
 
 type Modal =
   'requirements' | 'upload' | 'export' | 'checks' | 'account' | 'history' | 'project-import' | null;
@@ -245,6 +245,22 @@ export default function Planner() {
   authOwnerRef.current = auth.user?.id || null;
   activeProjectRef.current = project;
   useEffect(() => {
+    // A different drawing must not inherit selection, unfinished tool clicks,
+    // reference evidence or an unapplied proposal from the previous project.
+    setSelected(null);
+    setPoint(null);
+    setRuler(null);
+    setProposal(null);
+    setEvidence(null);
+    setEvidenceSelections({});
+    setFiles([]);
+    setMessages([]);
+    setPrompt('');
+    drag.current = null;
+    busyOperation.current++;
+    setBusy(false);
+  }, [project?.id]);
+  useEffect(() => {
     setUndo([]);
     busyOperation.current++;
     setBusy(false);
@@ -347,16 +363,17 @@ export default function Planner() {
     setSelected(null);
   }
   function updateFloor(next: Floor, note = 'Drawing edited', validate = true) {
-    if (!project) return;
+    if (!project) return false;
     const issues = geometryIssues(next, project.requirements).filter((v) => v.severity === 'error');
     if (validate && issues.length) {
       setNotice(issues.map((x) => x.title).join(', '));
-      return;
+      return false;
     }
     change(
       { ...project, floors: project.floors.map((f, i) => (i === floorIndex ? next : f)) },
       note,
     );
+    return true;
   }
   function openRequirements(newOne = false) {
     setCreatingNew(newOne);
@@ -1720,20 +1737,19 @@ export default function Planner() {
                           ) / units[unit]
                         }
                         onChange={(v) => {
-                          const horizontal = Math.abs(selectedWall.a.y - selectedWall.b.y) < 1;
-                          const w = {
-                            ...selectedWall,
-                            b: horizontal
-                              ? { x: selectedWall.a.x + v * units[unit], y: selectedWall.b.y }
-                              : { x: selectedWall.b.x, y: selectedWall.a.y + v * units[unit] },
-                          };
-                          updateFloor(
-                            { ...floor, walls: floor.walls.map((q) => (q.id === w.id ? w : q)) },
-                            'Changed wall length',
-                          );
-                          setNotice(
-                            'Wall length changed independently. Check adjacent junctions and room enclosure.',
-                          );
+                          try {
+                            const w = resizeWallLength(selectedWall, v * units[unit]);
+                            const applied = updateFloor(
+                              { ...floor, walls: floor.walls.map((q) => (q.id === w.id ? w : q)) },
+                              'Changed wall length',
+                            );
+                            if (applied)
+                              setNotice(
+                                'Wall length changed independently. Check adjacent junctions and room enclosure.',
+                              );
+                          } catch (error) {
+                            setNotice((error as Error).message);
+                          }
                         }}
                       />
                       <p className="helper">
@@ -2318,6 +2334,8 @@ export default function Planner() {
                           setFiles(list);
                           setError('');
                         } catch (err) {
+                          setFiles([]);
+                          e.target.value = '';
                           setError((err as Error).message);
                         }
                       }}

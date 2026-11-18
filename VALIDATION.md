@@ -1,5 +1,14 @@
 # Validation record
 
+## Launch regression pass — 17 November 2026
+
+See [LAUNCH_CHECK.md](LAUNCH_CHECK.md) for effective production Supabase verification,
+live signed-out access checks, desktop/mobile browser coverage, actual PDF/DXF/SVG/
+PNG/native downloads, confirmed repairs and remaining authenticated acceptance.
+All 67 local tests, TypeScript and production build pass. Supabase project URL/key
+match the owner-confirmed project; configuration, accounts and RLS were unchanged.
+AI currently returns an explicit 503 because server configuration is missing.
+
 ## Authentication diagnosis and recovery — 17 November 2026
 
 - Production's public Supabase URL resolves to project `zzqadafqlkavpryskwut`;
